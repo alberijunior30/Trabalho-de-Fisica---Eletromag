@@ -30,6 +30,7 @@ const COLORS = {
 
 const FIELD_HALF_HEIGHT = 4; // metade da altura das setas de campo (m)
 const MAX_TRAIL = 2000; // pontos máximos do rastro
+const BASE_SPACING = 4; // espaçamento das linhas de campo (m) quando |B| = 1 T
 
 export default function Simulation({
   params,
@@ -80,7 +81,7 @@ export default function Simulation({
     light.position.set(10, 20, 15);
     scene.add(light);
 
-    // Piso com grade de 1 m
+    // Piso com grade de 1 m (tamanho definido por REGION no lorentz.ts)
     const grid = new THREE.GridHelper(
       2 * REGION,
       2 * REGION,
@@ -90,22 +91,43 @@ export default function Simulation({
     grid.position.y = -FIELD_HALF_HEIGHT;
     scene.add(grid);
 
-    // Linhas de campo (setas verticais)
+    // ---------- Linhas de campo ----------
+    // A densidade de linhas é proporcional a |B|,
+    // então o espaçamento entre elas é proporcional a 1/√|B|.
     const fieldArrows: THREE.ArrowHelper[] = [];
-    for (let x = -8; x <= 8; x += 4) {
-      for (let z = -8; z <= 8; z += 4) {
-        const arrow = new THREE.ArrowHelper(
-          new THREE.Vector3(0, 1, 0),
-          new THREE.Vector3(x, -FIELD_HALF_HEIGHT, z),
-          2 * FIELD_HALF_HEIGHT,
-          COLORS.field,
-          0.5,
-          0.3,
-        );
-        scene.add(arrow);
-        fieldArrows.push(arrow);
+    let lastFieldB: number | null = null;
+
+    const buildField = (B: number) => {
+      for (const arrow of fieldArrows) {
+        scene.remove(arrow);
+        arrow.dispose();
       }
-    }
+      fieldArrows.length = 0;
+      if (B === 0) return;
+
+      const spacing = Math.min(
+        Math.max(BASE_SPACING / Math.sqrt(Math.abs(B)), 1.5),
+        12,
+      );
+      const n = Math.floor((REGION - 1) / spacing);
+      const direction = new THREE.Vector3(0, Math.sign(B), 0);
+      const startY = B > 0 ? -FIELD_HALF_HEIGHT : FIELD_HALF_HEIGHT;
+
+      for (let i = -n; i <= n; i++) {
+        for (let j = -n; j <= n; j++) {
+          const arrow = new THREE.ArrowHelper(
+            direction,
+            new THREE.Vector3(i * spacing, startY, j * spacing),
+            2 * FIELD_HALF_HEIGHT,
+            COLORS.field,
+            0.5,
+            0.3,
+          );
+          scene.add(arrow);
+          fieldArrows.push(arrow);
+        }
+      }
+    };
 
     // Partícula
     const particleMaterial = new THREE.MeshStandardMaterial({
@@ -155,7 +177,7 @@ export default function Simulation({
     const orbit = {
       theta: 0.6,
       phi: 0.9,
-      distance: 32,
+      distance: 45,
       dragging: false,
       lastX: 0,
       lastY: 0,
@@ -196,7 +218,7 @@ export default function Simulation({
       e.preventDefault();
       orbit.distance = Math.min(
         Math.max(orbit.distance * (1 + e.deltaY * 0.001), 10),
-        90,
+        120,
       );
     };
 
@@ -218,8 +240,6 @@ export default function Simulation({
     resize();
 
     // ---------- Loop de animação ----------
-    const up = new THREE.Vector3(0, 1, 0);
-    const down = new THREE.Vector3(0, -1, 0);
     let frameId = 0;
     let last = performance.now();
 
@@ -240,7 +260,7 @@ export default function Simulation({
         for (let i = 0; i < substeps; i++) s = step(s, p, dt / substeps);
 
         // Saiu da região (só acontece sem força) → recomeça
-        if (isOutside(s)) {
+        if (isOutside(s, p)) {
           s = initialState(p);
           trailCount = 0;
         }
@@ -262,11 +282,10 @@ export default function Simulation({
         p.q > 0 ? COLORS.positive : p.q < 0 ? COLORS.negative : COLORS.neutral,
       );
 
-      // Sentido do campo
-      for (const arrow of fieldArrows) {
-        arrow.visible = p.B !== 0;
-        arrow.position.y = p.B >= 0 ? -FIELD_HALF_HEIGHT : FIELD_HALF_HEIGHT;
-        arrow.setDirection(p.B >= 0 ? up : down);
+      // Reconstrói as linhas de campo só quando o valor de B muda
+      if (p.B !== lastFieldB) {
+        buildField(p.B);
+        lastFieldB = p.B;
       }
 
       // Vetores
@@ -302,6 +321,7 @@ export default function Simulation({
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("wheel", onWheel);
+      for (const arrow of fieldArrows) arrow.dispose();
       renderer.dispose();
       mount.removeChild(canvas);
     };
@@ -321,7 +341,8 @@ export default function Simulation({
           <span className="text-amber-600">━</span> força magnética F
         </span>
         <span>
-          <span className="text-gray-400">━</span> linhas de campo B
+          <span className="text-gray-400">━</span> linhas de campo B (mais
+          juntas = campo mais forte)
         </span>
         <span>Arraste para girar · roda do mouse para aproximar</span>
       </div>

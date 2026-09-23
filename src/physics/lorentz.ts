@@ -25,7 +25,7 @@ export interface ParticleState {
 }
 
 // Metade do tamanho da região visível (m)
-export const REGION = 10;
+export const REGION = 50;
 
 export function hasCircularMotion(p: Params): boolean {
   return p.q !== 0 && p.B !== 0;
@@ -111,6 +111,8 @@ export function step(s: ParticleState, p: Params, dt: number): ParticleState {
   };
 }
 
-export function isOutside(s: ParticleState): boolean {
+export function isOutside(s: ParticleState, p: Params): boolean {
+  // Com movimento circular a carga sempre volta, então nunca "sai"
+  if (hasCircularMotion(p)) return false;
   return Math.abs(s.pos.x) > REGION + 2 || Math.abs(s.pos.z) > REGION + 2;
 }
